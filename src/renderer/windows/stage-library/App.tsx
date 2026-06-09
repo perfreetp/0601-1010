@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { WindowLauncher } from '@/components/WindowLauncher';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
@@ -8,6 +8,24 @@ import { Modal } from '@/components/Modal';
 import { Badge } from '@/components/Badge';
 import { useFestivalStore } from '@/store/useFestivalStore';
 import { WindowType, Artist } from '@shared/types';
+import { format } from 'date-fns';
+
+const STAGE_LABELS: Record<string, string> = {
+  'main-stage-1': '主舞台',
+  'sub-stage-1': '副舞台A',
+  'sub-stage-2': '副舞台B',
+  'dj-booth-1': 'DJ区'
+};
+
+const getStageLabel = (stageId: string) => STAGE_LABELS[stageId] || stageId || '未知舞台';
+const formatSlotTime = (d: Date | string) => {
+  try {
+    const date = d instanceof Date ? d : new Date(d);
+    return format(date, 'MM月dd日 HH:mm');
+  } catch {
+    return String(d || '时间未知');
+  }
+};
 
 const STAGE_TEMPLATES = [
   { id: 't1', name: '经典四面台', icon: '🎪', tags: ['流行', '摇滚'], capacity: 5000 },
@@ -36,7 +54,11 @@ const App: React.FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ artist: Artist; slots: { id: string; startTime: string; endTime: string; stage: string }[] } | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const { artists, addArtist, updateArtist, removeArtist, schedule } = useFestivalStore();
+  const { artists, addArtist, updateArtist, removeArtist, schedule, initializePersistence } = useFestivalStore();
+
+  useEffect(() => {
+    initializePersistence();
+  }, [initializePersistence]);
 
   React.useEffect(() => {
     if (toast) {
@@ -86,7 +108,12 @@ const App: React.FC = () => {
   const handleDeleteClick = (artist: Artist) => {
     const affectedSlots = schedule
       .filter((s) => s.artistId === artist.id)
-      .map((s) => ({ id: s.id, startTime: s.startTime, endTime: s.endTime, stage: s.stage }));
+      .map((s) => ({
+        id: s.id,
+        startTime: formatSlotTime(s.startTime),
+        endTime: formatSlotTime(s.endTime),
+        stage: getStageLabel(s.stageId)
+      }));
     setShowDeleteConfirm({ artist, slots: affectedSlots });
   };
 

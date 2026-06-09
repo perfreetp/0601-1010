@@ -17,7 +17,11 @@ const App: React.FC = () => {
   const [schemeName, setSchemeName] = useState('');
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { heatZones, components, sponsorBooths, schemes, saveScheme, loadScheme } = useFestivalStore();
+  const { heatZones, components, sponsorBooths, schemes, saveScheme, loadScheme, initializePersistence } = useFestivalStore();
+
+  useEffect(() => {
+    initializePersistence();
+  }, [initializePersistence]);
 
   const totalVisitors = heatZones.reduce((sum, z) => sum + z.visitorCount, 0);
   const maxVisitors = Math.max(...heatZones.map((z) => z.visitorCount));

@@ -37,7 +37,11 @@ const App: React.FC = () => {
   });
   const walkTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { rehearsalPoints, addRehearsalPoint, updateRehearsalPoint, walkPaths } = useFestivalStore();
+  const { rehearsalPoints, addRehearsalPoint, updateRehearsalPoint, walkPaths, initializePersistence } = useFestivalStore();
+
+  useEffect(() => {
+    initializePersistence();
+  }, [initializePersistence]);
 
   const selectedPoint = rehearsalPoints.find((p) => p.id === selectedPointId);
   const activePath = walkPaths[0];

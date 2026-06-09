@@ -1,4 +1,4 @@
-import { WindowType, VenueScheme } from './types';
+import { WindowType, VenueScheme, Artist, ScheduleSlot, VirtualMerch } from './types';
 
 export interface ElectronAPI {
   openWindow: (windowType: WindowType) => Promise<boolean>;
@@ -13,6 +13,13 @@ export interface ElectronAPI {
   deleteScheme: (schemeId: string) => Promise<{ success: boolean }>;
   distributeMerch: (merchId: string, merchName: string, quantity?: number) => Promise<{ success: boolean; timestamp: string }>;
   getMerchRecords: () => Promise<any[]>;
+  loadMerchState: () => Promise<VirtualMerch[] | null>;
+  loadAppState: () => Promise<{ artists: Artist[]; schedule: ScheduleSlot[] } | null>;
+  broadcastState: (data: { artists?: Artist[]; schedule?: ScheduleSlot[] }) => Promise<{ success: boolean }>;
+  broadcastMerchUpdated: (merch: VirtualMerch[]) => Promise<{ success: boolean }>;
+  onArtistsUpdated: (callback: (artists: Artist[]) => void) => () => void;
+  onScheduleUpdated: (callback: (schedule: ScheduleSlot[]) => void) => () => void;
+  onMerchUpdated: (callback: (merch: VirtualMerch[]) => void) => () => void;
 }
 
 declare global {

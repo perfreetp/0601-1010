@@ -1,14 +1,15 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { WindowType } from '../shared/types';
-import { StageComponent, SponsorBooth, LightPreset, VenueScheme, VirtualMerch } from '../shared/types';
+import { WindowType, VirtualMerch, Artist, ScheduleSlot, VenueScheme } from '../shared/types';
 import { WindowManager } from './windowManager';
 
 let windowManager: WindowManager;
 let userDataDir: string;
 let schemesDir: string;
 let recordsDir: string;
+let merchStateFile: string;
+let appStateFile: string;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
@@ -16,12 +17,23 @@ function ensureDirs() {
   userDataDir = app.getPath('userData');
   schemesDir = path.join(userDataDir, 'schemes');
   recordsDir = path.join(userDataDir, 'records');
+  merchStateFile = path.join(userDataDir, 'merch-state.json');
+  appStateFile = path.join(userDataDir, 'app-state.json');
   
   if (!fs.existsSync(schemesDir)) {
     fs.mkdirSync(schemesDir, { recursive: true });
   }
   if (!fs.existsSync(recordsDir)) {
     fs.mkdirSync(recordsDir, { recursive: true });
+  }
+}
+
+function broadcastToAllWindows(channel: string, ...args: any[]) {
+  const windows = BrowserWindow.getAllWindows();
+  for (const win of windows) {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, ...args);
+    }
   }
 }
 
@@ -116,6 +128,61 @@ function saveMapImage(filePath: string, dataUrl: string): boolean {
   } catch (e) {
     console.error('Failed to save map image', e);
     return false;
+  }
+}
+
+function saveMerchState(merch: VirtualMerch[]): boolean {
+  try {
+    fs.writeFileSync(merchStateFile, JSON.stringify(merch, null, 2), 'utf-8');
+    return true;
+  } catch (e) {
+    console.error('Failed to save merch state', e);
+    return false;
+  }
+}
+
+function loadMerchState(): VirtualMerch[] | null {
+  try {
+    if (!fs.existsSync(merchStateFile)) return null;
+    const content = fs.readFileSync(merchStateFile, 'utf-8');
+    return JSON.parse(content) as VirtualMerch[];
+  } catch (e) {
+    console.error('Failed to load merch state', e);
+    return null;
+  }
+}
+
+interface AppState {
+  artists: Artist[];
+  schedule: ScheduleSlot[];
+}
+
+function saveAppState(state: AppState): boolean {
+  try {
+    fs.writeFileSync(appStateFile, JSON.stringify(state, null, 2), 'utf-8');
+    return true;
+  } catch (e) {
+    console.error('Failed to save app state', e);
+    return false;
+  }
+}
+
+function loadAppState(): AppState | null {
+  try {
+    if (!fs.existsSync(appStateFile)) return null;
+    const content = fs.readFileSync(appStateFile, 'utf-8');
+    const raw = JSON.parse(content);
+    if (raw.schedule && Array.isArray(raw.schedule)) {
+      raw.schedule = raw.schedule.map((s: any) => ({
+        ...s,
+        startTime: new Date(s.startTime),
+        endTime: new Date(s.endTime)
+      }));
+    }
+    return raw as AppState;
+  } catch (e) {
+    console.error('Failed to load app state', e);
+    return null;
   }
 }
 
@@ -219,4 +286,44 @@ ipcMain.handle('distribute-merch', async (_event, merchId: string, merchName: st
 
 ipcMain.handle('get-merch-records', () => {
   return getMerchRecords();
+});
+
+ipcMain.handle('save-merch-state', async (_event, merch: VirtualMerch[]) => {
+  const success = saveMerchState(merch);
+  return { success };
+});
+
+ipcMain.handle('load-merch-state', () => {
+  return loadMerchState();
+});
+
+ipcMain.handle('save-app-state', async (_event, state: AppState) => {
+  const success = saveAppState(state);
+  return { success };
+});
+
+ipcMain.handle('load-app-state', () => {
+  return loadAppState();
+});
+
+ipcMain.handle('broadcast-state', async (_event, data: { artists?: Artist[]; schedule?: ScheduleSlot[] }) => {
+  const current = loadAppState() || { artists: [], schedule: [] };
+  const merged: AppState = {
+    artists: data.artists !== undefined ? data.artists : current.artists,
+    schedule: data.schedule !== undefined ? data.schedule : current.schedule
+  };
+  saveAppState(merged);
+  if (data.artists !== undefined) {
+    broadcastToAllWindows('artists-updated', data.artists);
+  }
+  if (data.schedule !== undefined) {
+    broadcastToAllWindows('schedule-updated', data.schedule);
+  }
+  return { success: true };
+});
+
+ipcMain.handle('broadcast-merch-updated', async (_event, merch: VirtualMerch[]) => {
+  saveMerchState(merch);
+  broadcastToAllWindows('merch-updated', merch);
+  return { success: true };
 });

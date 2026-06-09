@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { WindowLauncher } from '@/components/WindowLauncher';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
@@ -37,7 +37,11 @@ const App: React.FC = () => {
     requireCode: false
   });
 
-  const { schedule, artists, components, addScheduleSlot, updateScheduleSlot, removeScheduleSlot } = useFestivalStore();
+  const { schedule, artists, components, addScheduleSlot, updateScheduleSlot, removeScheduleSlot, initializePersistence } = useFestivalStore();
+
+  useEffect(() => {
+    initializePersistence();
+  }, [initializePersistence]);
 
   const daySchedule = schedule.filter((s) => {
     const slotDay = format(new Date(s.startTime), 'yyyy-MM-dd');

@@ -109,12 +109,14 @@ const App: React.FC = () => {
     saveScheme,
     loadScheme,
     deleteScheme,
-    loadSchemesFromDisk
+    loadSchemesFromDisk,
+    initializePersistence
   } = useFestivalStore();
 
   useEffect(() => {
+    initializePersistence();
     loadSchemesFromDisk();
-  }, []);
+  }, [initializePersistence, loadSchemesFromDisk]);
 
   const showToastMessage = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });

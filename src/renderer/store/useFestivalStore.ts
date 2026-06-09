@@ -42,6 +42,9 @@ export interface MerchDistributionRecord {
 }
 
 interface FestivalState {
+  _persistenceInitialized: boolean;
+  initializePersistence: () => Promise<void>;
+
   components: StageComponent[];
   setComponents: (components: StageComponent[]) => void;
   addComponent: (component: Omit<StageComponent, 'id'>) => void;
@@ -64,7 +67,7 @@ interface FestivalState {
   setArtists: (artists: Artist[]) => void;
   addArtist: (artist: Omit<Artist, 'id'>) => void;
   updateArtist: (id: string, updates: Partial<Artist>) => void;
-  removeArtist: (id: string) => Artist[];
+  removeArtist: (id: string) => ScheduleSlot[];
 
   schedule: ScheduleSlot[];
   setSchedule: (schedule: ScheduleSlot[]) => void;
@@ -115,7 +118,56 @@ interface FestivalState {
   deleteScheme: (id: string) => Promise<boolean>;
 }
 
+function convertScheduleDates(schedule: any[]): ScheduleSlot[] {
+  return schedule.map((s) => ({
+    ...s,
+    startTime: s.startTime instanceof Date ? s.startTime : new Date(s.startTime),
+    endTime: s.endTime instanceof Date ? s.endTime : new Date(s.endTime)
+  }));
+}
+
 export const useFestivalStore = create<FestivalState>((set, get) => ({
+  _persistenceInitialized: false,
+  initializePersistence: async () => {
+    if (get()._persistenceInitialized) return;
+    if (!window.electronAPI) {
+      set({ _persistenceInitialized: true });
+      return;
+    }
+    try {
+      const [appState, merchState] = await Promise.all([
+        window.electronAPI.loadAppState(),
+        window.electronAPI.loadMerchState()
+      ]);
+      if (appState) {
+        set({
+          artists: appState.artists || get().artists,
+          schedule: convertScheduleDates(appState.schedule || get().schedule)
+        });
+      }
+      if (merchState && merchState.length > 0) {
+        set({ merch: merchState });
+      }
+      const unsubArtists = window.electronAPI.onArtistsUpdated((artists) => {
+        set({ artists });
+      });
+      const unsubSchedule = window.electronAPI.onScheduleUpdated((schedule) => {
+        set({ schedule: convertScheduleDates(schedule) });
+      });
+      const unsubMerch = window.electronAPI.onMerchUpdated((merch) => {
+        set({ merch });
+      });
+      window.addEventListener('beforeunload', () => {
+        unsubArtists();
+        unsubSchedule();
+        unsubMerch();
+      });
+    } catch (e) {
+      console.error('Failed to initialize persistence', e);
+    }
+    set({ _persistenceInitialized: true });
+  },
+
   components: DEFAULT_STAGE_COMPONENTS,
   setComponents: (components) => set({ components }),
   addComponent: (component) =>
@@ -160,46 +212,68 @@ export const useFestivalStore = create<FestivalState>((set, get) => ({
     })),
 
   artists: DEFAULT_ARTISTS,
-  setArtists: (artists) => set({ artists }),
-  addArtist: (artist) =>
-    set((state) => ({
-      artists: [...state.artists, { ...artist, id: uuidv4() }]
-    })),
-  updateArtist: (id, updates) =>
-    set((state) => ({
-      artists: state.artists.map((a) =>
-        a.id === id ? { ...a, ...updates } : a
-      )
-    })),
+  setArtists: (artists) => {
+    set({ artists });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastState({ artists });
+    }
+  },
+  addArtist: (artist) => {
+    const newArtist = { ...artist, id: uuidv4() };
+    const newArtists = [...get().artists, newArtist];
+    set({ artists: newArtists });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastState({ artists: newArtists });
+    }
+  },
+  updateArtist: (id, updates) => {
+    const newArtists = get().artists.map((a) => (a.id === id ? { ...a, ...updates } : a));
+    set({ artists: newArtists });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastState({ artists: newArtists });
+    }
+  },
   removeArtist: (id) => {
     const state = get();
-    const artist = state.artists.find((a) => a.id === id);
     const affectedSlots = state.schedule.filter((s) => s.artistId === id);
-    
-    set((s) => ({
-      artists: s.artists.filter((a) => a.id !== id),
-      schedule: s.schedule.filter((slot) => slot.artistId !== id)
-    }));
-    
+    const newArtists = state.artists.filter((a) => a.id !== id);
+    const newSchedule = state.schedule.filter((slot) => slot.artistId !== id);
+
+    set({ artists: newArtists, schedule: newSchedule });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastState({ artists: newArtists, schedule: newSchedule });
+    }
     return affectedSlots;
   },
 
   schedule: DEFAULT_SCHEDULE,
-  setSchedule: (schedule) => set({ schedule }),
-  addScheduleSlot: (slot) =>
-    set((state) => ({
-      schedule: [...state.schedule, { ...slot, id: uuidv4() }]
-    })),
-  updateScheduleSlot: (id, updates) =>
-    set((state) => ({
-      schedule: state.schedule.map((s) =>
-        s.id === id ? { ...s, ...updates } : s
-      )
-    })),
-  removeScheduleSlot: (id) =>
-    set((state) => ({
-      schedule: state.schedule.filter((s) => s.id !== id)
-    })),
+  setSchedule: (schedule) => {
+    set({ schedule });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastState({ schedule });
+    }
+  },
+  addScheduleSlot: (slot) => {
+    const newSchedule = [...get().schedule, { ...slot, id: uuidv4() }];
+    set({ schedule: newSchedule });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastState({ schedule: newSchedule });
+    }
+  },
+  updateScheduleSlot: (id, updates) => {
+    const newSchedule = get().schedule.map((s) => (s.id === id ? { ...s, ...updates } : s));
+    set({ schedule: newSchedule });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastState({ schedule: newSchedule });
+    }
+  },
+  removeScheduleSlot: (id) => {
+    const newSchedule = get().schedule.filter((s) => s.id !== id);
+    set({ schedule: newSchedule });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastState({ schedule: newSchedule });
+    }
+  },
 
   emojis: DEFAULT_EMOJIS,
   toggleEmoji: (id) =>
@@ -227,11 +301,19 @@ export const useFestivalStore = create<FestivalState>((set, get) => ({
     })),
 
   merch: DEFAULT_MERCH,
-  setMerch: (merch) => set({ merch }),
-  addMerch: (item) =>
-    set((state) => ({
-      merch: [...state.merch, { ...item, id: uuidv4() }]
-    })),
+  setMerch: (merch) => {
+    set({ merch });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastMerchUpdated(merch);
+    }
+  },
+  addMerch: (item) => {
+    const newMerch = [...get().merch, { ...item, id: uuidv4() }];
+    set({ merch: newMerch });
+    if (window.electronAPI) {
+      window.electronAPI.broadcastMerchUpdated(newMerch);
+    }
+  },
   merchRecords: [],
   loadMerchRecords: async () => {
     if (window.electronAPI) {
@@ -271,11 +353,13 @@ export const useFestivalStore = create<FestivalState>((set, get) => ({
         return { success: false, message: '记录发放失败' };
       }
     }
+
+    const newMerch = state.merch.map((m) =>
+      m.id === id ? { ...m, quantity: newQuantity } : m
+    );
     
     set((s) => ({
-      merch: s.merch.map((m) =>
-        m.id === id ? { ...m, quantity: newQuantity } : m
-      ),
+      merch: newMerch,
       merchRecords: [
         {
           id: `rec-${Date.now()}`,
@@ -287,6 +371,10 @@ export const useFestivalStore = create<FestivalState>((set, get) => ({
         ...s.merchRecords
       ]
     }));
+
+    if (window.electronAPI) {
+      window.electronAPI.broadcastMerchUpdated(newMerch);
+    }
     
     return { success: true, message: `成功发放 ${quantity} 件「${item.name}」`, remaining: newQuantity };
   },

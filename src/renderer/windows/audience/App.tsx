@@ -28,8 +28,13 @@ const App: React.FC = () => {
     votes, addVote, toggleVoteActive,
     merch, addMerch, distributeMerch,
     merchRecords, loadMerchRecords,
-    guests, addGuest, updateGuestStatus
+    guests, addGuest, updateGuestStatus,
+    initializePersistence
   } = useFestivalStore();
+
+  useEffect(() => {
+    initializePersistence();
+  }, [initializePersistence]);
 
   useEffect(() => {
     loadMerchRecords();

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { WindowLauncher } from '@/components/WindowLauncher';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
@@ -25,7 +25,11 @@ const App: React.FC = () => {
     requireCode: false
   });
 
-  const { tickets, updateTicket } = useFestivalStore();
+  const { tickets, updateTicket, initializePersistence } = useFestivalStore();
+
+  useEffect(() => {
+    initializePersistence();
+  }, [initializePersistence]);
 
   const totalRevenue = tickets.reduce((sum, t) => sum + t.price * t.soldQuantity, 0);
   const totalSold = tickets.reduce((sum, t) => sum + t.soldQuantity, 0);
