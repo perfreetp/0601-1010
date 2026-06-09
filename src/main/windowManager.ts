@@ -1,5 +1,7 @@
 import { BrowserWindow } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as url from 'url';
 import { WindowType, WINDOW_CONFIGS, WindowConfig } from '../shared/types';
 
 export class WindowManager {
@@ -39,8 +41,7 @@ export class WindowManager {
       autoHideMenuBar: true
     });
 
-    const windowUrl = this.getWindowUrl(windowType);
-    window.loadURL(windowUrl);
+    this.loadWindowContent(window, windowType);
 
     window.once('ready-to-show', () => {
       window.show();
@@ -52,6 +53,29 @@ export class WindowManager {
 
     this.windows.set(windowType, window);
     return true;
+  }
+
+  private loadWindowContent(window: BrowserWindow, windowType: WindowType) {
+    const windowUrl = this.getWindowUrl(windowType);
+    
+    if (this.isDev) {
+      this.loadWithRetry(window, windowUrl, 20, 500);
+    } else {
+      window.loadURL(windowUrl);
+    }
+  }
+
+  private loadWithRetry(window: BrowserWindow, urlStr: string, maxRetries: number, interval: number) {
+    let retries = 0;
+    const tryLoad = () => {
+      window.loadURL(urlStr).catch(() => {
+        retries++;
+        if (retries < maxRetries) {
+          setTimeout(tryLoad, interval);
+        }
+      });
+    };
+    tryLoad();
   }
 
   closeWindow(windowType: WindowType): boolean {
@@ -68,10 +92,23 @@ export class WindowManager {
     return Array.from(this.windows.keys());
   }
 
+  getWindow(windowType: WindowType): BrowserWindow | undefined {
+    return this.windows.get(windowType);
+  }
+
+  getAllWindows(): BrowserWindow[] {
+    return Array.from(this.windows.values());
+  }
+
   private getWindowUrl(windowType: WindowType): string {
     if (this.isDev) {
       return `http://localhost:5173/windows/${windowType}/index.html`;
     }
-    return path.join(__dirname, `../renderer/windows/${windowType}/index.html`);
+    const filePath = path.resolve(__dirname, `../renderer/windows/${windowType}/index.html`);
+    return url.format({
+      pathname: filePath,
+      protocol: 'file:',
+      slashes: true
+    });
   }
 }

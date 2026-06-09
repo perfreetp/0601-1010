@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { WindowLauncher } from '@/components/WindowLauncher';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
@@ -44,6 +44,25 @@ const getComponentColor = (type: StageComponent['type']): string => {
   return colors[type] || 'var(--bg-card)';
 };
 
+const getComponentSolidColor = (type: StageComponent['type']): string => {
+  const colors: Record<string, string> = {
+    'main-stage': '#8b5cf6',
+    'sub-stage': '#06b6d4',
+    'dj-booth': '#f43f5e',
+    'led-wall': '#10b981',
+    'speaker': '#f59e0b',
+    'light': '#fbbf24',
+    'seat': '#6366f1',
+    'entrance': '#14b8a6',
+    'vip-area': '#f43f5e',
+    'booth': '#8b5cf6'
+  };
+  return colors[type] || '#666';
+};
+
+const CANVAS_WIDTH = 1200;
+const CANVAS_HEIGHT = 800;
+
 const App: React.FC = () => {
   const [selectedTab, setSelectedTab] = useState<'components' | 'lights' | 'booths' | 'schemes'>('components');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -53,6 +72,7 @@ const App: React.FC = () => {
   const [schemeName, setSchemeName] = useState('');
   const [dragging, setDragging] = useState<{ type: string; offsetX: number; offsetY: number } | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [newPreset, setNewPreset] = useState<Partial<LightPreset>>({
     name: '',
     primaryColor: '#8b5cf6',
@@ -71,6 +91,7 @@ const App: React.FC = () => {
   });
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const exportCanvasRef = useRef<HTMLCanvasElement>(null);
   const {
     components,
     addComponent,
@@ -86,8 +107,19 @@ const App: React.FC = () => {
     removeSponsorBooth,
     schemes,
     saveScheme,
-    loadScheme
+    loadScheme,
+    deleteScheme,
+    loadSchemesFromDisk
   } = useFestivalStore();
+
+  useEffect(() => {
+    loadSchemesFromDisk();
+  }, []);
+
+  const showToastMessage = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const activePreset = lightPresets.find((p) => p.id === activeLightPreset);
 
@@ -157,20 +189,196 @@ const App: React.FC = () => {
     document.addEventListener('mouseup', handleMouseUp);
   };
 
+  const generateMapCanvas = (): string | null => {
+    const canvas = exportCanvasRef.current;
+    if (!canvas) return null;
+    
+    canvas.width = CANVAS_WIDTH;
+    canvas.height = CANVAS_HEIGHT;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    ctx.strokeStyle = 'rgba(139, 92, 246, 0.15)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= CANVAS_WIDTH; x += 40) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, CANVAS_HEIGHT);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= CANVAS_HEIGHT; y += 40) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(CANVAS_WIDTH, y);
+      ctx.stroke();
+    }
+
+    if (activePreset) {
+      const gradient = ctx.createRadialGradient(
+        CANVAS_WIDTH * 0.5, CANVAS_HEIGHT * 0.3, 50,
+        CANVAS_WIDTH * 0.5, CANVAS_HEIGHT * 0.3, 600
+      );
+      gradient.addColorStop(0, activePreset.primaryColor + '66');
+      gradient.addColorStop(0.7, activePreset.ambientColor + 'AA');
+      gradient.addColorStop(1, '#0a0a1a');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    }
+
+    components.forEach((comp) => {
+      ctx.save();
+      const color = getComponentSolidColor(comp.type);
+      
+      const gradient = ctx.createLinearGradient(comp.x, comp.y, comp.x + comp.width, comp.y + comp.height);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(1, adjustColor(color, -30));
+      
+      ctx.fillStyle = gradient;
+      roundRect(ctx, comp.x, comp.y, comp.width, comp.height, 12);
+      ctx.fill();
+      
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.lineWidth = 2;
+      roundRect(ctx, comp.x, comp.y, comp.width, comp.height, 12);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `bold ${Math.max(12, Math.min(comp.width, comp.height) * 0.2)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const iconSize = Math.min(comp.width, comp.height) * 0.35;
+      ctx.font = `${iconSize}px sans-serif`;
+      const icon = COMPONENT_LIBRARY.find((c) => c.type === comp.type)?.icon || '❓';
+      ctx.fillText(icon, comp.x + comp.width / 2, comp.y + comp.height / 2 - 10);
+      
+      ctx.font = `bold ${Math.max(10, Math.min(comp.width, comp.height) * 0.12)}px sans-serif`;
+      ctx.fillText(comp.name, comp.x + comp.width / 2, comp.y + comp.height / 2 + iconSize * 0.6);
+      
+      ctx.restore();
+    });
+
+    sponsorBooths.forEach((booth) => {
+      ctx.save();
+      
+      const gradient = ctx.createLinearGradient(booth.x, booth.y, booth.x + booth.width, booth.y + booth.height);
+      gradient.addColorStop(0, '#8b5cf6');
+      gradient.addColorStop(1, '#ec4899');
+      
+      ctx.fillStyle = gradient;
+      roundRect(ctx, booth.x, booth.y, booth.width, booth.height, 10);
+      ctx.fill();
+      
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 2;
+      roundRect(ctx, booth.x, booth.y, booth.width, booth.height, 10);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `${Math.min(booth.width, booth.height) * 0.25}px sans-serif`;
+      ctx.fillText('🏢', booth.x + booth.width / 2, booth.y + booth.height / 2 - 8);
+      
+      ctx.font = `bold ${Math.max(10, Math.min(booth.width, booth.height) * 0.15)}px sans-serif`;
+      ctx.fillText(booth.sponsorName, booth.x + booth.width / 2, booth.y + booth.height / 2 + 14);
+      
+      ctx.restore();
+    });
+
+    if (activePreset) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.font = 'bold 18px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`💡 灯光: ${activePreset.name}`, 20, 20);
+    }
+
+    const now = new Date();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`生成时间: ${now.toLocaleString()}`, CANVAS_WIDTH - 20, CANVAS_HEIGHT - 20);
+    ctx.fillText(`组件: ${components.length} | 展位: ${sponsorBooths.length}`, CANVAS_WIDTH - 20, CANVAS_HEIGHT - 40);
+
+    ctx.strokeStyle = '#8b5cf6';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    return canvas.toDataURL('image/png');
+  };
+
+  const roundRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  };
+
+  const adjustColor = (hex: string, amount: number): string => {
+    const num = parseInt(hex.replace('#', ''), 16);
+    const r = Math.max(0, Math.min(255, (num >> 16) + amount));
+    const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00FF) + amount));
+    const b = Math.max(0, Math.min(255, (num & 0x0000FF) + amount));
+    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+  };
+
   const handleExportMap = async () => {
+    const dataUrl = generateMapCanvas();
+    if (!dataUrl) {
+      showToastMessage('生成地图图片失败', 'error');
+      return;
+    }
+    
     if (window.electronAPI) {
-      const result = await window.electronAPI.exportMap();
-      if (!result.canceled) {
-        alert(`活动地图已导出到: ${result.filePath}`);
+      const result = await window.electronAPI.exportMap(dataUrl);
+      if (!result.canceled && result.saved) {
+        showToastMessage(`地图已导出到: ${result.filePath}`, 'success');
+      } else if (!result.canceled) {
+        showToastMessage('导出失败', 'error');
       }
     }
   };
 
-  const handleSaveScheme = () => {
-    if (schemeName.trim()) {
-      saveScheme(schemeName.trim());
+  const handleSaveScheme = async () => {
+    if (!schemeName.trim()) {
+      showToastMessage('请输入方案名称', 'error');
+      return;
+    }
+    const result = await saveScheme(schemeName.trim());
+    showToastMessage(result.message, result.success ? 'success' : 'error');
+    if (result.success) {
       setSchemeName('');
       setShowSaveSchemeModal(false);
+    }
+  };
+
+  const handleLoadScheme = (id: string) => {
+    const success = loadScheme(id);
+    if (success) {
+      showToastMessage('方案已加载', 'success');
+    } else {
+      showToastMessage('加载失败', 'error');
+    }
+  };
+
+  const handleDeleteScheme = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('确定要删除此方案吗？')) {
+      const success = await deleteScheme(id);
+      showToastMessage(success ? '已删除' : '删除失败', success ? 'success' : 'error');
     }
   };
 
@@ -186,6 +394,7 @@ const App: React.FC = () => {
         pattern: 'static'
       });
       setShowAddPresetModal(false);
+      showToastMessage('灯光预设已添加', 'success');
     }
   };
 
@@ -194,6 +403,7 @@ const App: React.FC = () => {
       addSponsorBooth(newBooth as Omit<SponsorBooth, 'id'>);
       setNewBooth({ sponsorName: '', description: '', x: 100, y: 100, width: 120, height: 80 });
       setShowAddBoothModal(false);
+      showToastMessage('赞助展位已添加', 'success');
     }
   };
 
@@ -202,6 +412,7 @@ const App: React.FC = () => {
 
   return (
     <div className="app-container">
+      <canvas ref={exportCanvasRef} style={{ display: 'none' }} />
       <WindowLauncher currentWindow={WindowType.VENUE_EDITOR} />
       <div className="main-content">
         <div className="topbar">
@@ -296,18 +507,28 @@ const App: React.FC = () => {
               )}
               {selectedTab === 'schemes' && (
                 <div>
-                  <div className="text-secondary text-sm mb-sm">已保存方案</div>
+                  <div className="text-secondary text-sm mb-sm">已保存方案 ({schemes.length})</div>
                   {schemes.map((scheme) => (
-                    <div key={scheme.id} className="list-item" style={{ padding: 'var(--spacing-sm)', marginBottom: 'var(--spacing-xs)' }}>
-                      <div className="flex-1">
+                    <div
+                      key={scheme.id}
+                      className="list-item"
+                      style={{ padding: 'var(--spacing-sm)', marginBottom: 'var(--spacing-xs)' }}
+                    >
+                      <div className="flex-1" onClick={() => handleLoadScheme(scheme.id)} style={{ cursor: 'pointer' }}>
                         <div className="font-medium">{scheme.name}</div>
                         <div className="text-muted" style={{ fontSize: 'var(--font-xs)' }}>
                           {new Date(scheme.updatedAt).toLocaleDateString()}
                         </div>
                       </div>
-                      <Button variant="secondary" size="sm" onClick={() => loadScheme(scheme.id)}>加载</Button>
+                      <div className="flex gap-xs">
+                        <Button variant="primary" size="sm" onClick={() => handleLoadScheme(scheme.id)}>加载</Button>
+                        <Button variant="danger" size="sm" onClick={(e) => handleDeleteScheme(scheme.id, e)}>×</Button>
+                      </div>
                     </div>
                   ))}
+                  {schemes.length === 0 && (
+                    <div className="text-muted text-sm text-center py-md">暂无保存的方案</div>
+                  )}
                 </div>
               )}
             </div>
@@ -316,7 +537,7 @@ const App: React.FC = () => {
             <div
               ref={canvasRef}
               className={`canvas-container drop-target ${isDragOver ? 'drag-over' : ''}`}
-              style={{ width: 1200, height: 800, margin: '0 auto', position: 'relative' }}
+              style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, margin: '0 auto', position: 'relative' }}
               onDragOver={handleCanvasDragOver}
               onDragLeave={handleCanvasDragLeave}
               onDrop={handleCanvasDrop}
@@ -407,7 +628,7 @@ const App: React.FC = () => {
                 </div>
                 <Input label="旋转角度" type="number" value={selectedComponent.rotation} onChange={(e) => updateComponent(selectedComponent.id, { rotation: Number(e.target.value) })} />
                 <div className="mt-lg">
-                  <Button variant="danger" block icon="🗑️" onClick={() => { removeComponent(selectedComponent.id); setSelectedId(null); }}>
+                  <Button variant="danger" block icon="🗑️" onClick={() => { removeComponent(selectedComponent.id); setSelectedId(null); showToastMessage('组件已删除', 'info'); }}>
                     删除组件
                   </Button>
                 </div>
@@ -434,7 +655,7 @@ const App: React.FC = () => {
                   <Input label="高度" type="number" value={selectedBooth.height} onChange={(e) => updateSponsorBooth(selectedBooth.id, { height: Number(e.target.value) })} />
                 </div>
                 <div className="mt-lg">
-                  <Button variant="danger" block icon="🗑️" onClick={() => { removeSponsorBooth(selectedBooth.id); setSelectedId(null); }}>
+                  <Button variant="danger" block icon="🗑️" onClick={() => { removeSponsorBooth(selectedBooth.id); setSelectedId(null); showToastMessage('展位已删除', 'info'); }}>
                     删除展位
                   </Button>
                 </div>
@@ -502,8 +723,20 @@ const App: React.FC = () => {
           </>
         }
       >
-        <Input label="方案名称" value={schemeName} onChange={(e) => setSchemeName(e.target.value)} placeholder="输入方案名称..." />
+        <Input label="方案名称" value={schemeName} onChange={(e) => setSchemeName(e.target.value)} placeholder="输入方案名称以便后续识别" />
+        <div className="text-muted text-sm mt-sm">
+          方案将包含当前所有组件、展位和灯光配置，自动保存到本地
+        </div>
       </Modal>
+
+      {toast && (
+        <div className="toast" style={{
+          background: toast.type === 'success' ? 'var(--accent-success)' : toast.type === 'error' ? 'var(--accent-error)' : 'var(--bg-card)',
+          color: toast.type === 'success' || toast.type === 'error' ? 'white' : undefined
+        }}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 };

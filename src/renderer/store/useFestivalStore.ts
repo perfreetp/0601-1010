@@ -33,6 +33,14 @@ import {
   DEFAULT_SCHEMES
 } from '@shared/mockData';
 
+export interface MerchDistributionRecord {
+  id: string;
+  merchId: string;
+  merchName: string;
+  quantity: number;
+  timestamp: string;
+}
+
 interface FestivalState {
   components: StageComponent[];
   setComponents: (components: StageComponent[]) => void;
@@ -56,7 +64,7 @@ interface FestivalState {
   setArtists: (artists: Artist[]) => void;
   addArtist: (artist: Omit<Artist, 'id'>) => void;
   updateArtist: (id: string, updates: Partial<Artist>) => void;
-  removeArtist: (id: string) => void;
+  removeArtist: (id: string) => Artist[];
 
   schedule: ScheduleSlot[];
   setSchedule: (schedule: ScheduleSlot[]) => void;
@@ -76,6 +84,9 @@ interface FestivalState {
   merch: VirtualMerch[];
   setMerch: (merch: VirtualMerch[]) => void;
   addMerch: (item: Omit<VirtualMerch, 'id'>) => void;
+  distributeMerch: (id: string, quantity?: number) => Promise<{ success: boolean; message: string; remaining?: number }>;
+  merchRecords: MerchDistributionRecord[];
+  loadMerchRecords: () => Promise<void>;
 
   guests: Guest[];
   setGuests: (guests: Guest[]) => void;
@@ -98,8 +109,10 @@ interface FestivalState {
   setHeatZones: (zones: HeatZone[]) => void;
 
   schemes: VenueScheme[];
-  saveScheme: (name: string) => void;
-  loadScheme: (id: string) => void;
+  loadSchemesFromDisk: () => Promise<void>;
+  saveScheme: (name: string) => Promise<{ success: boolean; message: string }>;
+  loadScheme: (id: string) => boolean;
+  deleteScheme: (id: string) => Promise<boolean>;
 }
 
 export const useFestivalStore = create<FestivalState>((set, get) => ({
@@ -158,10 +171,18 @@ export const useFestivalStore = create<FestivalState>((set, get) => ({
         a.id === id ? { ...a, ...updates } : a
       )
     })),
-  removeArtist: (id) =>
-    set((state) => ({
-      artists: state.artists.filter((a) => a.id !== id)
-    })),
+  removeArtist: (id) => {
+    const state = get();
+    const artist = state.artists.find((a) => a.id === id);
+    const affectedSlots = state.schedule.filter((s) => s.artistId === id);
+    
+    set((s) => ({
+      artists: s.artists.filter((a) => a.id !== id),
+      schedule: s.schedule.filter((slot) => slot.artistId !== id)
+    }));
+    
+    return affectedSlots;
+  },
 
   schedule: DEFAULT_SCHEDULE,
   setSchedule: (schedule) => set({ schedule }),
@@ -211,6 +232,64 @@ export const useFestivalStore = create<FestivalState>((set, get) => ({
     set((state) => ({
       merch: [...state.merch, { ...item, id: uuidv4() }]
     })),
+  merchRecords: [],
+  loadMerchRecords: async () => {
+    if (window.electronAPI) {
+      try {
+        const records = await window.electronAPI.getMerchRecords();
+        set({ merchRecords: records as MerchDistributionRecord[] });
+      } catch (e) {
+        console.error('Failed to load merch records', e);
+      }
+    }
+  },
+  distributeMerch: async (id, quantity = 1) => {
+    const state = get();
+    const item = state.merch.find((m) => m.id === id);
+    
+    if (!item) {
+      return { success: false, message: '周边不存在' };
+    }
+    
+    if (item.quantity <= 0) {
+      return { success: false, message: '库存已用完' };
+    }
+    
+    if (item.quantity < quantity) {
+      return { success: false, message: `库存不足，剩余 ${item.quantity} 件` };
+    }
+    
+    const newQuantity = item.quantity - quantity;
+    
+    if (window.electronAPI) {
+      try {
+        const result = await window.electronAPI.distributeMerch(id, item.name, quantity);
+        if (!result.success) {
+          return { success: false, message: '记录发放失败' };
+        }
+      } catch (e) {
+        return { success: false, message: '记录发放失败' };
+      }
+    }
+    
+    set((s) => ({
+      merch: s.merch.map((m) =>
+        m.id === id ? { ...m, quantity: newQuantity } : m
+      ),
+      merchRecords: [
+        {
+          id: `rec-${Date.now()}`,
+          merchId: id,
+          merchName: item.name,
+          quantity,
+          timestamp: new Date().toISOString()
+        },
+        ...s.merchRecords
+      ]
+    }));
+    
+    return { success: true, message: `成功发放 ${quantity} 件「${item.name}」`, remaining: newQuantity };
+  },
 
   guests: DEFAULT_GUESTS,
   setGuests: (guests) => set({ guests }),
@@ -254,7 +333,19 @@ export const useFestivalStore = create<FestivalState>((set, get) => ({
   setHeatZones: (heatZones) => set({ heatZones }),
 
   schemes: DEFAULT_SCHEMES,
-  saveScheme: (name) => {
+  loadSchemesFromDisk: async () => {
+    if (window.electronAPI) {
+      try {
+        const diskSchemes = await window.electronAPI.getSchemes();
+        if (diskSchemes && diskSchemes.length > 0) {
+          set({ schemes: diskSchemes });
+        }
+      } catch (e) {
+        console.error('Failed to load schemes from disk', e);
+      }
+    }
+  },
+  saveScheme: async (name) => {
     const state = get();
     const newScheme: VenueScheme = {
       id: uuidv4(),
@@ -265,7 +356,16 @@ export const useFestivalStore = create<FestivalState>((set, get) => ({
       booths: state.sponsorBooths,
       lights: state.lightPresets
     };
-    set((s) => ({ schemes: [...s.schemes, newScheme] }));
+    
+    if (window.electronAPI) {
+      const result = await window.electronAPI.saveSchemeToDisk(newScheme);
+      if (!result.success) {
+        return { success: false, message: '保存到磁盘失败' };
+      }
+    }
+    
+    set((s) => ({ schemes: [newScheme, ...s.schemes] }));
+    return { success: true, message: `方案「${name}」已保存` };
   },
   loadScheme: (id) => {
     const scheme = get().schemes.find((s) => s.id === id);
@@ -273,8 +373,18 @@ export const useFestivalStore = create<FestivalState>((set, get) => ({
       set({
         components: scheme.components,
         sponsorBooths: scheme.booths,
-        lightPresets: scheme.lights
+        lightPresets: scheme.lights,
+        activeLightPreset: scheme.lights[0]?.id || null
       });
+      return true;
     }
+    return false;
+  },
+  deleteScheme: async (id) => {
+    if (window.electronAPI) {
+      await window.electronAPI.deleteScheme(id);
+    }
+    set((s) => ({ schemes: s.schemes.filter((sc) => sc.id !== id) }));
+    return true;
   }
 }));

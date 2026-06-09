@@ -33,8 +33,17 @@ const App: React.FC = () => {
     socialLinks: []
   });
   const [newSocial, setNewSocial] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ artist: Artist; slots: { id: string; startTime: string; endTime: string; stage: string }[] } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  const { artists, addArtist, updateArtist, removeArtist } = useFestivalStore();
+  const { artists, addArtist, updateArtist, removeArtist, schedule } = useFestivalStore();
+
+  React.useEffect(() => {
+    if (toast) {
+      const t = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [toast]);
 
   const handleOpenArtist = (artist?: Artist) => {
     if (artist) {
@@ -72,6 +81,26 @@ const App: React.FC = () => {
       ...artistForm,
       socialLinks: (artistForm.socialLinks || []).filter((_, i) => i !== index)
     });
+  };
+
+  const handleDeleteClick = (artist: Artist) => {
+    const affectedSlots = schedule
+      .filter((s) => s.artistId === artist.id)
+      .map((s) => ({ id: s.id, startTime: s.startTime, endTime: s.endTime, stage: s.stage }));
+    setShowDeleteConfirm({ artist, slots: affectedSlots });
+  };
+
+  const confirmDelete = () => {
+    if (showDeleteConfirm) {
+      const affected = removeArtist(showDeleteConfirm.artist.id);
+      setToast({
+        message: affected.length > 0
+          ? `已删除「${showDeleteConfirm.artist.name}」及关联的 ${affected.length} 场排程`
+          : `已删除「${showDeleteConfirm.artist.name}」`,
+        type: 'success'
+      });
+      setShowDeleteConfirm(null);
+    }
   };
 
   return (
@@ -178,7 +207,7 @@ const App: React.FC = () => {
                   </div>
                   <div className="flex justify-end gap-sm mt-md">
                     <Button variant="secondary" size="sm" onClick={() => handleOpenArtist(artist)}>编辑</Button>
-                    <Button variant="danger" size="sm" onClick={() => removeArtist(artist.id)}>删除</Button>
+                    <Button variant="danger" size="sm" onClick={() => handleDeleteClick(artist)}>删除</Button>
                   </div>
                 </Card>
               ))}
@@ -249,6 +278,71 @@ const App: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      <Modal
+        open={!!showDeleteConfirm}
+        title="确认删除艺人"
+        onClose={() => setShowDeleteConfirm(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowDeleteConfirm(null)}>取消</Button>
+            <Button variant="danger" onClick={confirmDelete}>确认删除</Button>
+          </>
+        }
+      >
+        {showDeleteConfirm && (
+          <div>
+            <p style={{ marginBottom: 'var(--spacing-md)' }}>
+              确定要删除艺人 <strong>「{showDeleteConfirm.artist.name}」</strong> 吗？
+            </p>
+            {showDeleteConfirm.slots.length > 0 ? (
+              <div>
+                <p style={{ color: 'var(--accent-warning)', marginBottom: 'var(--spacing-sm)' }}>
+                  ⚠️ 将同时删除以下 {showDeleteConfirm.slots.length} 场排程：
+                </p>
+                <div style={{
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: 'var(--spacing-md)',
+                  maxHeight: 200,
+                  overflowY: 'auto'
+                }}>
+                  {showDeleteConfirm.slots.map((slot) => (
+                    <div key={slot.id} style={{
+                      padding: 'var(--spacing-sm)',
+                      borderBottom: '1px solid var(--border-color)',
+                      fontSize: 'var(--font-sm)'
+                    }}>
+                      <span className="badge badge-info" style={{ marginRight: 8 }}>{slot.stage}</span>
+                      {slot.startTime} - {slot.endTime}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-muted text-sm">该艺人暂无关联排程。</p>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          padding: 'var(--spacing-sm) var(--spacing-lg)',
+          background: toast.type === 'success' ? 'var(--accent-success)' : 'var(--accent-error)',
+          color: '#fff',
+          borderRadius: 'var(--radius-md)',
+          boxShadow: 'var(--shadow-lg)',
+          fontWeight: 500
+        }}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { WindowLauncher } from '@/components/WindowLauncher';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
@@ -15,18 +15,37 @@ const App: React.FC = () => {
   const [showVoteModal, setShowVoteModal] = useState(false);
   const [showMerchModal, setShowMerchModal] = useState(false);
   const [showGuestModal, setShowGuestModal] = useState(false);
+  const [showRecordsModal, setShowRecordsModal] = useState(false);
   const [newEmoji, setNewEmoji] = useState('');
   const [newEmojiLabel, setNewEmojiLabel] = useState('');
   const [voteForm, setVoteForm] = useState({ title: '', options: ['', ''] });
   const [merchForm, setMerchForm] = useState({ name: '', description: '', quantity: 1000, price: 0 });
   const [guestForm, setGuestForm] = useState<Partial<Guest>>({ name: '', seatNumber: '', status: 'pending' });
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const {
     emojis, toggleEmoji, addEmoji,
     votes, addVote, toggleVoteActive,
-    merch, addMerch,
+    merch, addMerch, distributeMerch,
+    merchRecords, loadMerchRecords,
     guests, addGuest, updateGuestStatus
   } = useFestivalStore();
+
+  useEffect(() => {
+    loadMerchRecords();
+  }, [loadMerchRecords]);
+
+  useEffect(() => {
+    if (toast) {
+      const t = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [toast]);
+
+  const handleDistribute = async (merchId: string, merchName: string) => {
+    const result = await distributeMerch(merchId, 1);
+    setToast({ message: result.message, type: result.success ? 'success' : 'error' });
+  };
 
   const handleAddEmoji = () => {
     if (newEmoji.trim() && newEmojiLabel.trim()) {
@@ -201,38 +220,63 @@ const App: React.FC = () => {
           )}
 
           {activeTab === 'merch' && (
-            <div className="grid grid-cols-3 gap-lg">
-              {merch.map((item) => (
-                <Card key={item.id}>
-                  <div className="text-center mb-sm">
-                    <div style={{
-                      width: 80, height: 80, margin: '0 auto',
-                      background: 'var(--gradient-secondary)',
-                      borderRadius: 'var(--radius-lg)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 'var(--font-2xl)'
-                    }}>
-                      🎁
-                    </div>
+            <>
+              <div className="flex justify-between items-center mb-md">
+                <Badge variant="info">共发放 {merchRecords.length} 次</Badge>
+                <Button variant="secondary" size="sm" onClick={() => setShowRecordsModal(true)}>查看发放记录</Button>
+              </div>
+              <div className="grid grid-cols-3 gap-lg">
+                {merch.map((item) => {
+                  const isOutOfStock = item.quantity <= 0;
+                  return (
+                    <Card key={item.id} style={{ opacity: isOutOfStock ? 0.6 : 1 }}>
+                      <div className="text-center mb-sm">
+                        <div style={{
+                          width: 80, height: 80, margin: '0 auto',
+                          background: isOutOfStock ? 'var(--bg-disabled)' : 'var(--gradient-secondary)',
+                          borderRadius: 'var(--radius-lg)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 'var(--font-2xl)'
+                        }}>
+                          {isOutOfStock ? '⛔' : '🎁'}
+                        </div>
+                      </div>
+                      <h3 className="font-semibold text-center">{item.name}</h3>
+                      <p className="text-secondary text-sm text-center mt-xs">{item.description}</p>
+                      <div className="flex justify-between mt-md">
+                        <div>
+                          <div className="text-muted text-xs">库存</div>
+                          <div className={`font-semibold ${isOutOfStock ? 'text-danger' : ''}`}>
+                            {isOutOfStock ? '已售罄' : item.quantity.toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-muted text-xs">价格</div>
+                          <div className="font-semibold text-accent">{item.price === 0 ? '免费' : `¥${item.price}`}</div>
+                        </div>
+                      </div>
+                      <div className="mt-md">
+                        <Button
+                          variant={isOutOfStock ? 'secondary' : 'primary'}
+                          block
+                          size="sm"
+                          disabled={isOutOfStock}
+                          onClick={() => !isOutOfStock && handleDistribute(item.id, item.name)}
+                        >
+                          {isOutOfStock ? '库存不足' : '发放'}
+                        </Button>
+                      </div>
+                    </Card>
+                  );
+                })}
+                {merch.length === 0 && (
+                  <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+                    <div className="empty-state-icon">🎁</div>
+                    <div className="empty-state-text">暂无虚拟周边，点击右上角添加</div>
                   </div>
-                  <h3 className="font-semibold text-center">{item.name}</h3>
-                  <p className="text-secondary text-sm text-center mt-xs">{item.description}</p>
-                  <div className="flex justify-between mt-md">
-                    <div>
-                      <div className="text-muted text-xs">库存</div>
-                      <div className="font-semibold">{item.quantity.toLocaleString()}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-muted text-xs">价格</div>
-                      <div className="font-semibold text-accent">{item.price === 0 ? '免费' : `¥${item.price}`}</div>
-                    </div>
-                  </div>
-                  <div className="mt-md">
-                    <Button variant="primary" block size="sm">发放</Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
+                )}
+              </div>
+            </>
           )}
 
           {activeTab === 'guests' && (
@@ -365,6 +409,65 @@ const App: React.FC = () => {
           ]}
         />
       </Modal>
+
+      <Modal
+        open={showRecordsModal}
+        title="虚拟周边发放记录"
+        onClose={() => setShowRecordsModal(false)}
+        footer={
+          <Button variant="primary" onClick={() => setShowRecordsModal(false)}>关闭</Button>
+        }
+      >
+        {merchRecords.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-icon">📋</div>
+            <div className="empty-state-text">暂无发放记录</div>
+          </div>
+        ) : (
+          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>周边</th>
+                  <th>数量</th>
+                </tr>
+              </thead>
+              <tbody>
+                {merchRecords.map((record) => (
+                  <tr key={record.id}>
+                    <td className="text-muted text-sm">
+                      {new Date(record.timestamp).toLocaleString('zh-CN')}
+                    </td>
+                    <td>
+                      <Badge variant="primary">{record.merchName}</Badge>
+                    </td>
+                    <td className="font-semibold text-accent">× {record.quantity}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Modal>
+
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          padding: 'var(--spacing-sm) var(--spacing-lg)',
+          background: toast.type === 'success' ? 'var(--accent-success)' : 'var(--accent-error)',
+          color: '#fff',
+          borderRadius: 'var(--radius-md)',
+          boxShadow: 'var(--shadow-lg)',
+          fontWeight: 500
+        }}>
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 };

@@ -5,9 +5,10 @@
   "main": "dist/main/main.js",
   "author": "Metaverse Festival Team",
   "scripts": {
-    "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
+    "dev": "npm run build:main && concurrently -k -n renderer,main,electron -c magenta,cyan,green \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
-    "dev:main": "tsc -p tsconfig.main.json --watch",
+    "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput",
+    "dev:electron": "wait-on tcp:5173 && cross-env NODE_ENV=development electron .",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
@@ -33,7 +34,9 @@
     "vite": "^5.0.7",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1",
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0",
+    "cross-env": "^7.0.3"
   },
   "build": {
     "appId": "com.metaverse.festival",
